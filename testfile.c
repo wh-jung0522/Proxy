@@ -1,12 +1,31 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-#define BUFFERSIZE 1000
+#define BUFFERSIZE 100
 #define MAXURL 2048
 
+int HaveDoubleEnter(unsigned char* pcInOutBuffer);
+int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport);
 
 int main (int argc, char* argv[]){
 
+
+    unsigned char* pcTestText[] = {"GET http://www.google.com:79 HTTP/1.0\nHost: www.google.com\r\n\r\n"};
+    unsigned char* pcCopiedBuffer = calloc(1,BUFFERSIZE+1);
+    int hasDoubleEnter;
+    int nDestBuffer = 1;
+    int i =0;
+
+    do{
+        nDestBuffer = DynamicCopyBuffer(&pcCopiedBuffer,pcTestText[i], nDestBuffer);
+    }
+    while(!HaveDoubleEnter(pcTestText[i++]));
+    char* pcHost = calloc(1,MAXURL+1); 
+    int nPort = 0;
+    int isError = 0;
+
+    isError = ProcessFromHeader(pcCopiedBuffer,pcHost,&nPort);
 
 
     return 0;
@@ -22,7 +41,7 @@ int HaveDoubleEnter(unsigned char* pcInOutBuffer){
     if(pvNeedle != NULL) return 1;
     else return 0;
 }
-int DynamicCopyBuffer(unsigned char* pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer){
+int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer){
 
 	/*
         Input/Output : pcDestBuffer 
@@ -34,23 +53,23 @@ int DynamicCopyBuffer(unsigned char* pcDestBuffer, unsigned char* pcSrcBuffer, c
                        pcDestBuffer memory size == nDestBuffer * BUFFERSIZE +1
         return       : nDestBuffer
     */
-   int nBufferLength = strlen(pcDestBuffer);
+   int nBufferLength = strlen(*pcDestBuffer);
    int nSrcLength = strlen(pcSrcBuffer);
 
    if ((nBufferLength+nSrcLength) > nDestBuffer*BUFFERSIZE){
        unsigned char* pcTemp = calloc(1,((nDestBuffer+1)*BUFFERSIZE) +1);
-       pcTemp = strcat(pcTemp,pcDestBuffer);
+       pcTemp = strcat(pcTemp,*pcDestBuffer);
        pcTemp = strcat(pcTemp,pcSrcBuffer);
-       free(pcDestBuffer);
-       pcDestBuffer = pcTemp;
+       free(*pcDestBuffer);
+       *pcDestBuffer = pcTemp;
        return nDestBuffer+1;
    }
    else{
-       pcDestBuffer = strcat(pcDestBuffer,pcSrcBuffer);
+       *pcDestBuffer = strcat(*pcDestBuffer,pcSrcBuffer);
        return nDestBuffer;
    }
 }
-int ProcessFromHeader(char* pcInHeader, char* pcOutHostname, int* pnOutport){
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport){
 
     /*    
         Input  : pcInHeader == GET http://www.google.co.kr/ HTTP/1.0
@@ -105,7 +124,7 @@ int ProcessFromHeader(char* pcInHeader, char* pcOutHostname, int* pnOutport){
     {
         strncpy(pcOutHostname,pcTempFromCommand,nUrlLength);
     }
-    if(*pcTempFromCommandEnd == ":")
+    if(*pcTempFromCommandEnd == ':')
     {
         *pnOutport = atoi(pcTempFromCommandEnd+1);
     }

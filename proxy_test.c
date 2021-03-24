@@ -1,13 +1,5 @@
-/*
-
-
-*/
-
 //
 // proxy.c - CS:APP Web proxy
-//
-// Student Information:
-//     김지현, 2013-11392
 //
 // 0.  argv[1]에서 프록시를 작동시킬 포트 번호를 얻어낸다.
 // 1.  소켓 하나를 초기화시켜 연결이 들어올때까지 기다린다.
@@ -44,29 +36,15 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define PORT "3490"  // the port users will be connecting to
-
+#define BUFFERSIZE 100
+#define MAXURL 2048
 #define BACKLOG 10   // how many pending connections queue will hold
 
-void sigchld_handler(int s)
-{
-    // waitpid() might overwrite errno, so we save and restore it:
-    int saved_errno = errno;
-
-    while(waitpid(-1, NULL, WNOHANG) > 0);
-
-    errno = saved_errno;
-}
-
-// get sockaddr, IPv4 or IPv6:
-void *get_in_addr(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
-
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
+int HaveDoubleEnter(unsigned char* pcInOutBuffer);
+int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport);
+void sigchld_handler(int s);
+void *get_in_addr(struct sockaddr *sa);
 
 int main(int argc, char* argv[])
 {
@@ -93,7 +71,7 @@ int main(int argc, char* argv[])
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE; // use my IP
 
-    if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
+    if ((rv = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
@@ -140,6 +118,15 @@ int main(int argc, char* argv[])
 
     printf("server: waiting for connections...\n");
 
+    int nRecvHeader = 0;
+    unsigned char* pcRecvBuffer = calloc(1, BUFFERSIZE+1);
+    unsigned char* pcCopiedHeader = calloc(1,BUFFERSIZE+1);
+    unsigned char* pcHost = calloc(1,MAXURL+1); 
+    int nDestBuffer = 1;
+    unsigned char* pcHost = calloc(1,MAXURL+1); 
+    int nPort = 0;
+
+
     while(1) {  // main accept() loop
         lenClientLength = sizeof structClientAddr;
         newClient = accept(sockfd, (struct sockaddr *)&structClientAddr, &lenClientLength);
@@ -156,15 +143,31 @@ int main(int argc, char* argv[])
             //3. Recv HTTP data from Web server 
             //4. Send HTTP data to client
 
+            //1. Recv from telnet
+            while(1)
+            {
+                nRecvHeader = recv(newClient, pcRecvBuffer, BUFFERSIZE, MSG_DONTWAIT);
+                if((nRecvHeader==-1)||(nRecvHeader==0))
+                {   
+                    break;
+                }
+                nDestBuffer = DynamicCopyBuffer(&pcCopiedHeader,pcRecvBuffer, nDestBuffer);
+                if(HaveDoubleEnter(pcRecvBuffer)) break;
+            }
+            if(ProcessFromHeader(pcCopiedHeader,pcHost,&nPort)) 
+            {
+                close(newClient);
+                exit(0);
+                return 0;
+            }
 
-
-
-            if (send(newClient, "Hello, world!", 13, 0) == -1)
-                perror("send");
-
-
-
-
+            //2. Send To HTTP Server
+            struct addrinfo* addrHTTPServer;
+            // IP Get from DNS server
+            if(getaddrinfo(pcHost,NULL,NULL,&addrHTTPServer)!=0) fprintf(stderr,"503 Service Unavailable\n");
+            // Set Port
+            struct sockaddr_in* addrHTTPServerIn = (struct sockaddr_in*)addrHTTPServer->ai_addr;
+            addrHTTPServerIn->sin_port = htons(nPort);
 
 
 
@@ -182,4 +185,123 @@ int main(int argc, char* argv[])
     }
 
     return 0;
+}
+int HaveDoubleEnter(unsigned char* pcInOutBuffer){
+    /*
+        Input/Output : pcInOutBuffer -> DynamicCopyBuffer(_,pcSrcBuffer,_)
+        return : Have "\r\n\r\n" 1 , If not 0 
+    */
+    void* pvNeedle = NULL;
+    pvNeedle = strstr(pcInOutBuffer,"\r\n\r\n");
+    if(pvNeedle != NULL) return 1;
+    else return 0;
+}
+int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer){
+
+	/*
+        Input/Output : pcDestBuffer 
+                       Already allocated (BUFFERSIZE+1), already written
+                       (Init Setting : pcDestBuffer = calloc(1,BUFFERSIZE + 1);)
+        Input        : pcSrcBuffer  
+                       MemorySize == BUFFERSIZE + 1
+        Input        : nDestBuffer
+                       pcDestBuffer memory size == nDestBuffer * BUFFERSIZE +1
+        return       : nDestBuffer
+    */
+   int nBufferLength = strlen(*pcDestBuffer);
+   int nSrcLength = strlen(pcSrcBuffer);
+
+   if ((nBufferLength+nSrcLength) > nDestBuffer*BUFFERSIZE){
+       unsigned char* pcTemp = calloc(1,((nDestBuffer+1)*BUFFERSIZE) +1);
+       pcTemp = strcat(pcTemp,*pcDestBuffer);
+       pcTemp = strcat(pcTemp,pcSrcBuffer);
+       free(*pcDestBuffer);
+       *pcDestBuffer = pcTemp;
+       return nDestBuffer+1;
+   }
+   else{
+       *pcDestBuffer = strcat(*pcDestBuffer,pcSrcBuffer);
+       return nDestBuffer;
+   }
+}
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport){
+
+    /*    
+        Input  : pcInHeader == GET http://www.google.co.kr/ HTTP/1.0
+                               Host: www.google.co.kr
+                               .... \r\n\r\n\0
+        Output : pcOutHostname => www.google.co.kr already allocated char[MAXURL+1]
+               : pnOutport == 80
+        return : Error==0, Success==1
+    */
+    *pnOutport = 80;
+    if(strncmp("GET",pcInHeader,3) != 0){ //should consider (only Start of Buffer)!
+        fprintf(stderr,"<GET> Command Not Exist\n");
+        return 0;
+    }
+    void* pvHostNeedle = NULL;
+    pvHostNeedle = strstr(pcInHeader,"Host");
+    if(pvHostNeedle == NULL){
+        fprintf(stderr,"Host Command Not Exist\n");
+        return 0;
+    }
+    //TODO : Host, Host from GET Must Same, -> 400 Bad Request
+    
+    unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
+    if(pcTempFromCommand == NULL){
+        fprintf(stderr,"GET url Not Exist\n");
+        return 0;
+    }
+    pcTempFromCommand+=7;//strlen("http://") == 7
+    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/");
+    int nUrlLength = pcTempFromCommandEnd-pcTempFromCommand; //without '/'
+
+    unsigned char* pcTempFromHost = strchr(pvHostNeedle, ' ');
+    if(pcTempFromHost == NULL){
+        fprintf(stderr,"HOST url Not Exist\n");
+        return 0;
+    }
+    pcTempFromHost+=1;
+    unsigned char* pcTempFromHostEnd = strstr(pcTempFromCommand, "\r\n");
+    int nUrlFromHostLength = pcTempFromHostEnd - pcTempFromHost;
+
+    if(nUrlLength != nUrlFromHostLength)
+    {
+        fprintf(stderr,"400 Bad Request\n");
+        return 0;
+    }
+    else if (strncmp(pcTempFromHost,pcTempFromCommand,nUrlLength) != 0)
+    {
+        fprintf(stderr,"400 Bad Request\n");
+        return 0;
+    }
+    else
+    {
+        strncpy(pcOutHostname,pcTempFromCommand,nUrlLength);
+    }
+    if(*pcTempFromCommandEnd == ':')
+    {
+        *pnOutport = atoi(pcTempFromCommandEnd+1);
+    }
+
+    return 1;
+}
+void sigchld_handler(int s)
+{
+    // waitpid() might overwrite errno, so we save and restore it:
+    int saved_errno = errno;
+
+    while(waitpid(-1, NULL, WNOHANG) > 0);
+
+    errno = saved_errno;
+}
+
+// get sockaddr, IPv4 or IPv6:
+void *get_in_addr(struct sockaddr *sa)
+{
+    if (sa->sa_family == AF_INET) {
+        return &(((struct sockaddr_in*)sa)->sin_addr);
+    }
+
+    return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
