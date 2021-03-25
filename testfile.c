@@ -6,12 +6,12 @@
 
 int HaveDoubleEnter(unsigned char* pcInOutBuffer);
 int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
-int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport);
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport);
 
 int main (int argc, char* argv[]){
 
 
-    unsigned char* pcTestText[] = {"GET http://www.google.com:79 HTTP/1.0\nHost: www.google.com\r\n\r\n"};
+    unsigned char* pcTestText[] = {"GET http://www.google.com:79/ HTTP/1.0\nHost: www.google.com\r\n\r\n"};
     unsigned char* pcCopiedBuffer = calloc(1,BUFFERSIZE+1);
     int hasDoubleEnter;
     int nDestBuffer = 1;
@@ -25,7 +25,8 @@ int main (int argc, char* argv[]){
     int nPort = 0;
     int isError = 0;
 
-    isError = ProcessFromHeader(pcCopiedBuffer,pcHost,&nPort);
+    unsigned char* pcSendBuffer = calloc(1,strlen(pcCopiedBuffer)+1);
+    isError = ProcessFromHeader(pcCopiedBuffer,pcSendBuffer,pcHost,&nPort);
 
 
     return 0;
@@ -69,12 +70,14 @@ int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, 
        return nDestBuffer;
    }
 }
-int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, int* pnOutport){
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport){
 
     /*    
         Input  : pcInHeader == GET http://www.google.co.kr/ HTTP/1.0
                                Host: www.google.co.kr
                                .... \r\n\r\n\0
+        Output : pcOutHeader == GET / HTTP/1.0
+                                Host : www.google.co.kr\r\n\r\n\0
         Output : pcOutHostname => www.google.co.kr already allocated char[MAXURL+1]
                : pnOutport == 80
         return : Error==0, Success==1
@@ -84,7 +87,8 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, i
         fprintf(stderr,"<GET> Command Not Exist\n");
         return 0;
     }
-    void* pvHostNeedle = NULL;
+
+    unsigned char* pvHostNeedle = NULL;
     pvHostNeedle = strstr(pcInHeader,"Host");
     if(pvHostNeedle == NULL){
         fprintf(stderr,"Host Command Not Exist\n");
@@ -127,7 +131,11 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHostname, i
     if(*pcTempFromCommandEnd == ':')
     {
         *pnOutport = atoi(pcTempFromCommandEnd+1);
+        pcTempFromCommandEnd = strchr(pcTempFromCommandEnd,  '/');
     }
+
+    strncat(pcOutHeader,pcInHeader,4);// "GET " 
+    strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
 
     return 1;
 }
