@@ -3,6 +3,7 @@
 #include<string.h>
 #define BUFFERSIZE 100
 #define MAXURL 2048
+#define REDIRECTIONURL "http://warning.or.kr"
 
 int HaveDoubleEnter(unsigned char* pcInOutBuffer);
 int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
@@ -11,7 +12,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 int main (int argc, char* argv[]){
 
 
-    unsigned char* pcTestText[] = {"GET http://www.google.com HTTP/1.0\nHost: http://www.google.com\r\n\r\n"};
+    unsigned char* pcTestText[] = {"GET http://www.kist.re.kr/kist_web/resource/image/common/footer_logo.png HTTP/1.0\r\nHost: www.kist.re.kr\r\n\r\n"};
     unsigned char* pcCopiedBuffer = calloc(1,BUFFERSIZE+1);
     int hasDoubleEnter;
     int nDestBuffer = 1;
@@ -167,8 +168,24 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         int nCmdCpyLength = pcHostNeedle-pcTempFromCommandEnd;
         strncat(pcOutHeader, pcTempFromCommandEnd, nCmdCpyLength);
         strcat(pcOutHeader,"Host: ");
-        strcat(pcOutHeader,pcTempFromHost);
+        strncat(pcOutHeader,pcTempFromHost,nUrlLength);
+        strcat(pcOutHeader+nUrlLength,pcTempFromHost+nUrlLength);
     }
     
     return 0;
+}
+
+
+int HostRedirector(char* pcInputHost, char* Blacklist[])
+{
+    int nBlackList = sizeof(Blacklist) / sizeof(char*);
+
+    for(int i=0;i<nBlackList;i++)
+    {
+        if(strcmp(pcInputHost,Blacklist[i])==0)
+        {
+            pcInputHost = realloc(pcInputHost,strlen(REDIRECTIONURL)+1);
+            strcpy(pcInputHost,REDIRECTIONURL);
+        }
+    }
 }

@@ -36,7 +36,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define BUFFERSIZE 100
+#define BUFFERSIZE 1024
 #define MAXURL 2048
 #define BACKLOG 10   // how many pending connections queue will hold
 
@@ -168,6 +168,7 @@ int main(int argc, char* argv[])
             while(nRecvHeaderSize>0);
             memset(pcRecvHeader,0,BUFFERSIZE+1);
             unsigned char* pcSendHeader = calloc(1,strlen(pcCopiedHeader)+1);
+
 
             if((ErrorNo = ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort)) != 0) 
             {
@@ -357,6 +358,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return 400;
     }
 
+
     unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
     if(pcTempFromCommand == NULL){
         fprintf(stderr,"GET url Not Exist\n");
@@ -419,7 +421,8 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         int nCmdCpyLength = pcHostNeedle-pcTempFromCommandEnd;
         strncat(pcOutHeader, pcTempFromCommandEnd, nCmdCpyLength);
         strcat(pcOutHeader,"Host: ");
-        strcat(pcOutHeader,pcTempFromHost);
+        strncat(pcOutHeader,pcTempFromHost,nUrlLength);
+        strcat(pcOutHeader+nUrlLength,pcTempFromHost+nUrlLength);
     }
     
     return 0;
