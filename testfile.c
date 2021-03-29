@@ -11,7 +11,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 int main (int argc, char* argv[]){
 
 
-    unsigned char* pcTestText[] = {"GET http://www.google.com:79/ HTTP/1.0\nHost: www.google.com\r\n\r\n"};
+    unsigned char* pcTestText[] = {"GET http://www.google.com HTTP/1.0\nHost: http://www.google.com\r\n\r\n"};
     unsigned char* pcCopiedBuffer = calloc(1,BUFFERSIZE+1);
     int hasDoubleEnter;
     int nDestBuffer = 1;
@@ -88,13 +88,13 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return 0;
     }
 
-    unsigned char* pvHostNeedle = NULL;
-    pvHostNeedle = strstr(pcInHeader,"Host");
-    if(pvHostNeedle == NULL){
+    unsigned char* pcHostNeedle = NULL;
+    pcHostNeedle = strstr(pcInHeader,"Host");
+    if(pcHostNeedle == NULL){
         fprintf(stderr,"Host Command Not Exist\n");
         return 0;
     }
-    //TODO : Host, Host from GET Must Same, -> 400 Bad Request
+
     
     unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
     if(pcTempFromCommand == NULL){
@@ -102,16 +102,25 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return 0;
     }
     pcTempFromCommand+=7;//strlen("http://") == 7
-    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/");
+    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/ ");
     int nUrlLength = pcTempFromCommandEnd-pcTempFromCommand; //without '/'
 
-    unsigned char* pcTempFromHost = strchr(pvHostNeedle, ' ');
+    unsigned char* pcTempFromHost = strchr(pcHostNeedle, ' ');
     if(pcTempFromHost == NULL){
         fprintf(stderr,"HOST url Not Exist\n");
         return 0;
     }
     pcTempFromHost+=1;
-    unsigned char* pcTempFromHostEnd = strstr(pcTempFromCommand, "\r\n");
+    //TODO : Erase From Host http:// Not Did
+    unsigned char* pcHostRequest = NULL;
+    pcHostRequest = strstr(pcTempFromHost,"http://");
+    if(pcHostRequest != NULL)
+    {
+        pcTempFromHost+=7;
+    }
+
+
+    unsigned char* pcTempFromHostEnd = strstr(pcTempFromHost, "\r\n");
     int nUrlFromHostLength = pcTempFromHostEnd - pcTempFromHost;
 
     if(nUrlLength != nUrlFromHostLength)
@@ -131,11 +140,26 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     if(*pcTempFromCommandEnd == ':')
     {
         *pnOutport = atoi(pcTempFromCommandEnd+1);
-        pcTempFromCommandEnd = strchr(pcTempFromCommandEnd,  '/');
+        pcTempFromCommandEnd = strpbrk(pcTempFromCommandEnd,  "/ ");
     }
 
     strncat(pcOutHeader,pcInHeader,4);// "GET " 
-    strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
 
+    if(*pcTempFromCommandEnd == ' ')
+    {
+        strncat(pcOutHeader,"/",1);
+    }
+    if (pcHostRequest == NULL)
+    {
+        strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
+    }
+    else 
+    {
+        int nCmdCpyLength = pcHostNeedle-pcTempFromCommandEnd;
+        strncat(pcOutHeader, pcTempFromCommandEnd, nCmdCpyLength);
+        strcat(pcOutHeader,"Host: ");
+        strcat(pcOutHeader,pcTempFromHost);
+    }
+    
     return 1;
 }

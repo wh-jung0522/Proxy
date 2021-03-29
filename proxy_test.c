@@ -57,7 +57,8 @@ int main(int argc, char* argv[])
 
 
     //Networking Beej's Guide
-    int sockfd, newClient;  // listen on sock_fd, new connection on newClient
+    int sockfd;  // listen on sock_fd, new connection on newClient
+    int newClient = 0;
     struct addrinfo hints, *servinfo, *p;
     struct sockaddr_storage structClientAddr; // connector's address information
     socklen_t lenClientLength;
@@ -118,14 +119,8 @@ int main(int argc, char* argv[])
 
     printf("server: waiting for connections...\n");
 
-    int nRecvHeader = 0;
-    unsigned char* pcRecvHeader = calloc(1, BUFFERSIZE+1);
-    unsigned char* pcCopiedHeader = calloc(1,BUFFERSIZE+1);
-    unsigned char* pcHost = calloc(1,MAXURL+1);
-    unsigned char* pcBuffer = calloc(1,BUFFERSIZE+1);
-    unsigned char* pcSendBuffer = calloc(1,BUFFERSIZE+1);
-    int nDestBuffer = 1;
-    int nPort = 0;
+    
+
     
 
     while(1) {  // main accept() loop
@@ -145,23 +140,39 @@ int main(int argc, char* argv[])
             //4. Send HTTP data to client
 
             //1. Recv from telnet
-            while(1)
-            {
-                nRecvHeader = recv(newClient, pcRecvHeader, BUFFERSIZE, MSG_DONTWAIT);
-                if((nRecvHeader==-1)||(nRecvHeader==0))
-                {   
+            unsigned char* pcRecvHeader = calloc(1, BUFFERSIZE+1);
+            unsigned char* pcCopiedHeader = calloc(1,BUFFERSIZE+1);
+            unsigned char* pcHost = calloc(1,MAXURL+1);
+            unsigned char* pcBuffer = calloc(1,BUFFERSIZE+1);
+            unsigned char* pcSendBuffer = calloc(1,BUFFERSIZE+1);
+            int nDestBuffer = 1;
+            int nPort = 0;
+            int nRemainHeaderSize = BUFFERSIZE;
+            int nRecvHeaderSize = 0;
+            do{
+                nRecvHeaderSize=recv(newClient,pcRecvHeader,nRemainHeaderSize,0);
+                if(nRecvHeaderSize == -1){ 
+                    perror("recv");
                     break;
                 }
+                nRemainHeaderSize-=nRecvHeaderSize;
                 nDestBuffer = DynamicCopyBuffer(&pcCopiedHeader,pcRecvHeader, nDestBuffer);
-                if(HaveDoubleEnter(pcRecvHeader)) break;
+                if(HaveDoubleEnter(pcCopiedHeader)) 
+                {
+                    break;
+                }
+                else
+                {
+                    memset(pcRecvHeader,0,BUFFERSIZE+1);
+                }
             }
+            while(nRecvHeaderSize>0);
+            memset(pcRecvHeader,0,BUFFERSIZE+1);
             unsigned char* pcSendHeader = calloc(1,strlen(pcCopiedHeader)+1);
 
             if(!ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort)) 
             {
-                close(newClient);
-                exit(0);
-                return 0;
+                goto MemFree;
             }
 
             //2. Send To HTTP Server
@@ -170,49 +181,78 @@ int main(int argc, char* argv[])
             if(getaddrinfo(pcHost,NULL,NULL,&addrHTTPServer)!=0) 
             {
                 fprintf(stderr,"503 Service Unavailable\n");
-                close(newClient);
-                exit(0);
-                return 0;
+                goto MemFree;
             }
             // Set Port
             struct sockaddr_in* addrHTTPServerIn = (struct sockaddr_in*)addrHTTPServer->ai_addr;
             addrHTTPServerIn->sin_port = htons(nPort);
 
             //Connection with HTTP Server
-            int nServerSock;
+            int nServerSock = 0;
 
             if((nServerSock = socket(addrHTTPServer->ai_family, addrHTTPServer->ai_socktype, 0))==-1)
             {  
                 perror("socket");
-                return 0;
+                goto MemFree;
             }
             if(connect(nServerSock, addrHTTPServer->ai_addr,addrHTTPServer->ai_addrlen)==-1)
             {
                 perror("connect");
-                return 0;
+                goto MemFree;
             }
             if(send(nServerSock,pcSendHeader,strlen(pcSendHeader)+1,0)==-1)
             {
                 perror("send");
-                return 0;
+                goto MemFree;
             }
+            if(pcSendHeader != NULL) free(pcSendHeader);
             //3. Recv HTTP data from Web server 
             int nRemainSize = BUFFERSIZE;
-            do{
-                nRemainSize-=recv(nServerSock,pcBuffer,nRemainSize,0);
-                memcpy(pcSendBuffer+(BUFFERSIZE-nRemainSize),pcBuffer,nRemainSize);
+            int nRecvSize = 0;
+            int isEnd = 0;
+            int nSend = 0;
+            while(1){
+                nRemainSize = BUFFERSIZE;
+                do{
+                    nRecvSize=recv(nServerSock,pcBuffer,nRemainSize,0);
+                    if(nRecvSize == 0){ 
+                        isEnd = 1;
+                        break;
+                    } // TODO
+                    memcpy(pcSendBuffer+(BUFFERSIZE-nRemainSize),pcBuffer,nRecvSize);
+                    memset(pcBuffer,0,BUFFERSIZE+1);
+                    nRemainSize-=nRecvSize;
+                }
+                while(nRemainSize>0);
+                if(isEnd && (strlen(pcSendBuffer)==0))
+                {
+                    break;
+                }
+                //4. Send HTTP data to client
+                nSend = send(newClient,pcSendBuffer,strlen(pcSendBuffer),0);
+                if(nSend==-1)
+                {
+                    perror("send");
+                    goto MemFree;
+                }
+                if(isEnd)
+                {
+                    break;
+                }
+                memset(pcSendBuffer,0,BUFFERSIZE+1);
             }
-            while(nRemainSize>0);
-            //4. Send HTTP data to client
-            send(newClient,pcSendBuffer,BUFFERSIZE,0);
 
-            //TODO : When Larger Than BUFFERSIZE
-
-            close(nServerSock);
-            close(newClient);
+        MemFree:
+            if(pcRecvHeader != NULL) free(pcRecvHeader);
+            if(pcCopiedHeader != NULL) free(pcCopiedHeader);
+            if(pcHost != NULL) free(pcHost);
+            if(pcBuffer != NULL) free(pcBuffer);
+            if(pcSendBuffer != NULL) free(pcSendBuffer);
+            if(nServerSock !=0) close(nServerSock);
+            if(newClient !=0) close(newClient);
             exit(0);
         }
-        close(newClient);  // parent doesn't need this
+        if(newClient !=0) close(newClient);  // parent doesn't need this
     }
 
     return 0;
@@ -273,13 +313,13 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return 0;
     }
 
-    unsigned char* pvHostNeedle = NULL;
-    pvHostNeedle = strstr(pcInHeader,"Host");
-    if(pvHostNeedle == NULL){
+    unsigned char* pcHostNeedle = NULL;
+    pcHostNeedle = strstr(pcInHeader,"Host");
+    if(pcHostNeedle == NULL){
         fprintf(stderr,"Host Command Not Exist\n");
         return 0;
     }
-    //TODO : Host, Host from GET Must Same, -> 400 Bad Request
+
     
     unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
     if(pcTempFromCommand == NULL){
@@ -287,16 +327,25 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return 0;
     }
     pcTempFromCommand+=7;//strlen("http://") == 7
-    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/");
+    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/ ");
     int nUrlLength = pcTempFromCommandEnd-pcTempFromCommand; //without '/'
 
-    unsigned char* pcTempFromHost = strchr(pvHostNeedle, ' ');
+    unsigned char* pcTempFromHost = strchr(pcHostNeedle, ' ');
     if(pcTempFromHost == NULL){
         fprintf(stderr,"HOST url Not Exist\n");
         return 0;
     }
     pcTempFromHost+=1;
-    unsigned char* pcTempFromHostEnd = strstr(pcTempFromCommand, "\r\n");
+    //TODO : Erase From Host http:// Not Did
+    unsigned char* pcHostRequest = NULL;
+    pcHostRequest = strstr(pcTempFromHost,"http://");
+    if(pcHostRequest != NULL)
+    {
+        pcTempFromHost+=7;
+    }
+
+
+    unsigned char* pcTempFromHostEnd = strstr(pcTempFromHost, "\r\n");
     int nUrlFromHostLength = pcTempFromHostEnd - pcTempFromHost;
 
     if(nUrlLength != nUrlFromHostLength)
@@ -316,12 +365,27 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     if(*pcTempFromCommandEnd == ':')
     {
         *pnOutport = atoi(pcTempFromCommandEnd+1);
-        pcTempFromCommandEnd = strchr(pcTempFromCommandEnd,  '/');
+        pcTempFromCommandEnd = strpbrk(pcTempFromCommandEnd,  "/ ");
     }
 
     strncat(pcOutHeader,pcInHeader,4);// "GET " 
-    strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
 
+    if(*pcTempFromCommandEnd == ' ')
+    {
+        strncat(pcOutHeader,"/",1);
+    }
+    if (pcHostRequest == NULL)
+    {
+        strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
+    }
+    else 
+    {
+        int nCmdCpyLength = pcHostNeedle-pcTempFromCommandEnd;
+        strncat(pcOutHeader, pcTempFromCommandEnd, nCmdCpyLength);
+        strcat(pcOutHeader,"Host: ");
+        strcat(pcOutHeader,pcTempFromHost);
+    }
+    
     return 1;
 }
 void sigchld_handler(int s)
