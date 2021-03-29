@@ -1,13 +1,15 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-#define BUFFERSIZE 100
+#define BUFFERSIZE 3
 #define MAXURL 2048
 #define REDIRECTIONURL "http://warning.or.kr"
 
 int HaveDoubleEnter(unsigned char* pcInOutBuffer);
 int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
 int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport);
+int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList);
+int FileToList(unsigned char** InBlacklist);
 
 int main (int argc, char* argv[]){
 
@@ -22,13 +24,17 @@ int main (int argc, char* argv[]){
         nDestBuffer = DynamicCopyBuffer(&pcCopiedBuffer,pcTestText[i], nDestBuffer);
     }
     while(!HaveDoubleEnter(pcTestText[i++]));
-    char* pcHost = calloc(1,MAXURL+1); 
+    
+    unsigned char* pcHost = calloc((MAXURL+1),1);
     int nPort = 0;
     int isError = 0;
 
     unsigned char* pcSendBuffer = calloc(1,strlen(pcCopiedBuffer)+1);
     isError = ProcessFromHeader(pcCopiedBuffer,pcSendBuffer,pcHost,&nPort);
 
+    unsigned char** pcBlackList = calloc(sizeof(unsigned char*),BUFFERSIZE);
+    int nListSize = FileToList(pcBlackList);
+    int isRedirection = IsRedirection(pcHost,pcBlackList,nListSize);
 
     return 0;
 }
@@ -59,7 +65,7 @@ int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, 
    int nSrcLength = strlen(pcSrcBuffer);
 
    if ((nBufferLength+nSrcLength) > nDestBuffer*BUFFERSIZE){
-       unsigned char* pcTemp = calloc(1,((nDestBuffer+1)*BUFFERSIZE) +1);
+       unsigned char* pcTemp = calloc(1,((nDestBuffer+1)*BUFFERSIZE) +1);// Memory Leak When Allocated 7 However 107 Data
        pcTemp = strcat(pcTemp,*pcDestBuffer);
        pcTemp = strcat(pcTemp,pcSrcBuffer);
        free(*pcDestBuffer);
@@ -176,16 +182,43 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 }
 
 
-int HostRedirector(char* pcInputHost, char* Blacklist[])
+int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList)
 {
-    int nBlackList = sizeof(Blacklist) / sizeof(char*);
-
     for(int i=0;i<nBlackList;i++)
     {
         if(strcmp(pcInputHost,Blacklist[i])==0)
         {
-            pcInputHost = realloc(pcInputHost,strlen(REDIRECTIONURL)+1);
-            strcpy(pcInputHost,REDIRECTIONURL);
+            return 1;
         }
     }
+    return 0;
+}
+
+int FileToList(unsigned char** InBlacklist)
+{
+    int nBlackList = 0;
+    int nMulBlacklist = 1;
+    unsigned char** TempBlackList = NULL;
+    unsigned char* pcReadLine = calloc(1,MAXURL+1);
+    while((fgets(pcReadLine,MAXURL,stdin)!= NULL))
+    {
+        nBlackList++;
+        if (nBlackList > (nMulBlacklist*BUFFERSIZE))
+        {
+            //realloc Blacklist
+            TempBlackList = calloc(sizeof(unsigned char*),(BUFFERSIZE*(nMulBlacklist+1)));
+            for(int i=0;i<(BUFFERSIZE*nMulBlacklist);i++)
+            {
+                TempBlackList[i] = InBlacklist[i];
+            }
+            free(InBlacklist);
+            InBlacklist = TempBlackList;
+            nMulBlacklist++;
+        }
+        InBlacklist[nBlackList-1] = calloc(1,strlen(pcReadLine)+1);
+        strcpy(InBlacklist[nBlackList-1],pcReadLine);
+        memset(pcReadLine,0,MAXURL+1);
+    }
+
+    return nBlackList;
 }
