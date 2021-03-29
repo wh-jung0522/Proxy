@@ -119,9 +119,6 @@ int main(int argc, char* argv[])
 
     printf("server: waiting for connections...\n");
 
-    
-
-    
 
     while(1) {  // main accept() loop
         lenClientLength = sizeof structClientAddr;
@@ -149,6 +146,8 @@ int main(int argc, char* argv[])
             int nPort = 0;
             int nRemainHeaderSize = BUFFERSIZE;
             int nRecvHeaderSize = 0;
+            int ErrorNo = 0;
+            char* ErrorText[] = {"400 Bad Request\n","503 Service Unavailable\n"};
             do{
                 nRecvHeaderSize=recv(newClient,pcRecvHeader,nRemainHeaderSize,0);
                 if(nRecvHeaderSize == -1){ 
@@ -170,10 +169,34 @@ int main(int argc, char* argv[])
             memset(pcRecvHeader,0,BUFFERSIZE+1);
             unsigned char* pcSendHeader = calloc(1,strlen(pcCopiedHeader)+1);
 
-            if(!ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort)) 
+            if((ErrorNo = ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort)) != 0) 
             {
+                //TODO : Error Handling
+                switch(ErrorNo)
+                {
+                    case 400:
+                    {
+                        if(send(newClient,ErrorText[0],strlen(ErrorText[0]),0)==-1)
+                        {
+                            perror("send");
+                            goto MemFree;
+                        }
+                        break;
+                    }
+                    case 503:
+                    {    
+                        if(send(newClient,ErrorText[1],strlen(ErrorText[1]),0)==-1)
+                        {
+                            perror("send");
+                            goto MemFree;
+                        }
+                        break;
+                    }
+                }
                 goto MemFree;
             }
+            //Todo : Host Compare!
+
 
             //2. Send To HTTP Server
             struct addrinfo* addrHTTPServer;
@@ -181,6 +204,11 @@ int main(int argc, char* argv[])
             if(getaddrinfo(pcHost,NULL,NULL,&addrHTTPServer)!=0) 
             {
                 fprintf(stderr,"503 Service Unavailable\n");
+                if(send(newClient,ErrorText[1],strlen(ErrorText[1]),0)==-1)
+                {
+                    perror("send");
+                    goto MemFree;
+                }                
                 goto MemFree;
             }
             // Set Port
@@ -308,23 +336,31 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return : Error==0, Success==1
     */
     *pnOutport = 80;
+
     if(strncmp("GET",pcInHeader,3) != 0){ //should consider (only Start of Buffer)!
         fprintf(stderr,"<GET> Command Not Exist\n");
-        return 0;
+        return 400;
     }
+
 
     unsigned char* pcHostNeedle = NULL;
     pcHostNeedle = strstr(pcInHeader,"Host");
     if(pcHostNeedle == NULL){
         fprintf(stderr,"Host Command Not Exist\n");
-        return 0;
+        return 400;
     }
 
-    
+    unsigned char* pcHTTPNeedle = NULL;
+    pcHTTPNeedle = strstr(pcInHeader,"HTTP");
+    if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
+        fprintf(stderr,"Host Command Not Exist\n");
+        return 400;
+    }
+
     unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
     if(pcTempFromCommand == NULL){
         fprintf(stderr,"GET url Not Exist\n");
-        return 0;
+        return 503;
     }
     pcTempFromCommand+=7;//strlen("http://") == 7
     unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/ ");
@@ -333,7 +369,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     unsigned char* pcTempFromHost = strchr(pcHostNeedle, ' ');
     if(pcTempFromHost == NULL){
         fprintf(stderr,"HOST url Not Exist\n");
-        return 0;
+        return 503;
     }
     pcTempFromHost+=1;
     //TODO : Erase From Host http:// Not Did
@@ -350,13 +386,13 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     if(nUrlLength != nUrlFromHostLength)
     {
-        fprintf(stderr,"400 Bad Request\n");
-        return 0;
+        fprintf(stderr,"503 Service Unavailable\n");
+        return 503;
     }
     else if (strncmp(pcTempFromHost,pcTempFromCommand,nUrlLength) != 0)
     {
         fprintf(stderr,"400 Bad Request\n");
-        return 0;
+        return 400;
     }
     else
     {
@@ -386,7 +422,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         strcat(pcOutHeader,pcTempFromHost);
     }
     
-    return 1;
+    return 0;
 }
 void sigchld_handler(int s)
 {

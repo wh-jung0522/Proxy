@@ -160,7 +160,7 @@ def compare_url(argtuple):
 
 def get_data(host, port, url, origin):
      '''Retrieve a URL using HTTP/1.0 GET.'''
-     getstring = 'GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n'
+     getstring = 'GET %s HTTP/1.0\r\nHost: %s\r\n\r\n'
      data = http_exchange(host, port,  getstring % (url, origin))
      return data.decode('utf-8').split('\n')
 

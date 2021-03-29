@@ -83,23 +83,32 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         return : Error==0, Success==1
     */
     *pnOutport = 80;
+
     if(strncmp("GET",pcInHeader,3) != 0){ //should consider (only Start of Buffer)!
         fprintf(stderr,"<GET> Command Not Exist\n");
-        return 0;
+        return 400;
     }
+
 
     unsigned char* pcHostNeedle = NULL;
     pcHostNeedle = strstr(pcInHeader,"Host");
     if(pcHostNeedle == NULL){
         fprintf(stderr,"Host Command Not Exist\n");
-        return 0;
+        return 400;
     }
 
-    
+    unsigned char* pcHTTPNeedle = NULL;
+    pcHTTPNeedle = strstr(pcInHeader,"HTTP");
+    if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
+        fprintf(stderr,"Host Command Not Exist\n");
+        return 400;
+    }
+
+
     unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
     if(pcTempFromCommand == NULL){
         fprintf(stderr,"GET url Not Exist\n");
-        return 0;
+        return 503;
     }
     pcTempFromCommand+=7;//strlen("http://") == 7
     unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/ ");
@@ -108,7 +117,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     unsigned char* pcTempFromHost = strchr(pcHostNeedle, ' ');
     if(pcTempFromHost == NULL){
         fprintf(stderr,"HOST url Not Exist\n");
-        return 0;
+        return 503;
     }
     pcTempFromHost+=1;
     //TODO : Erase From Host http:// Not Did
@@ -125,13 +134,13 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     if(nUrlLength != nUrlFromHostLength)
     {
-        fprintf(stderr,"400 Bad Request\n");
-        return 0;
+        fprintf(stderr,"503 Service Unavailable\n");
+        return 503;
     }
     else if (strncmp(pcTempFromHost,pcTempFromCommand,nUrlLength) != 0)
     {
         fprintf(stderr,"400 Bad Request\n");
-        return 0;
+        return 400;
     }
     else
     {
@@ -161,5 +170,5 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         strcat(pcOutHeader,pcTempFromHost);
     }
     
-    return 1;
+    return 0;
 }
