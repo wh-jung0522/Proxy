@@ -36,7 +36,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define REDIRECTIONURL "http://warning.or.kr"
+#define REDIRECTIONURL "warning.or.kr"
 #define BUFFERSIZE 1024
 #define MAXURL 2048
 #define BACKLOG 10   // how many pending connections queue will hold
@@ -472,7 +472,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     if(nHostLengthFromCommand != nHostLengthFromName)
     {
         fprintf(stderr,"503 Service Unavailable\n");
-        return 503;
+        return 400;
     }
     else if (strncmp(pcURLFromCommand,pcHostNameStart,nHostLengthFromCommand) != 0)
     {
@@ -496,6 +496,8 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         strcat(pcOutHeader,"/ HTTP/1.0\r\nHost: ");
         strcat(pcOutHeader,REDIRECTIONURL);
         strcat(pcOutHeader,"\r\n\r\n");  
+        memset(pcOutHostname,0,strlen(pcOutHostname)+1);
+        strncpy(pcOutHostname,REDIRECTIONURL,strlen(REDIRECTIONURL));
     }
     else
     {

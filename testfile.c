@@ -247,6 +247,8 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         strcat(pcOutHeader,"/ HTTP/1.0\r\nHost: ");
         strcat(pcOutHeader,REDIRECTIONURL);
         strcat(pcOutHeader,"\r\n\r\n");  
+        memset(pcOutHostname,0,strlen(pcOutHostname)+1);
+        strncpy(pcOutHostname,REDIRECTIONURL,strlen(REDIRECTIONURL));
     }
     else
     {
