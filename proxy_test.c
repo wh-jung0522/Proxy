@@ -56,7 +56,7 @@ int main(int argc, char* argv[])
 
     //Port Parser 
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <port number>\n", argv[0]);
+        //fprintf(stderr, "Usage: %s <port number>\n", argv[0]);
         return 1;
     }
 
@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
     hints.ai_flags = AI_PASSIVE; // use my IP
 
     if ((rv = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+        //fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
         return 1;
     }
 
@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
     freeaddrinfo(servinfo); // all done with this structure
 
     if (p == NULL)  {
-        fprintf(stderr, "server: failed to bind\n");
+        //fprintf(stderr, "server: failed to bind\n");
         exit(1);
     }
 
@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    printf("server: waiting for connections...\n");
+    //printf("server: waiting for connections...\n");
 
 
     while(1) {  // main accept() loop
@@ -133,7 +133,7 @@ int main(int argc, char* argv[])
         if (newClient == -1) { perror("accept"); continue;}
 
         inet_ntop(structClientAddr.ss_family, get_in_addr((struct sockaddr *)&structClientAddr), s, sizeof s);
-        printf("server: got connection from %s\n", s);
+        //printf("server: got connection from %s\n", s);
 
         if (!fork()) { // this is the child process
             close(sockfd); // child doesn't need the listener
@@ -209,7 +209,7 @@ int main(int argc, char* argv[])
             // IP Get from DNS server
             if(getaddrinfo(pcHost,NULL,NULL,&addrHTTPServer)!=0) 
             {
-                fprintf(stderr,"503 Service Unavailable\n");
+                //fprintf(stderr,"503 Service Unavailable\n");
                 if(send(newClient,ErrorText[1],strlen(ErrorText[1]),0)==-1)
                 {
                     perror("send");
@@ -345,7 +345,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     if(strncmp("GET ",pcInHeader,4) != 0)//TODO : space
     { 
-        fprintf(stderr,"<GET> Command Not Exist\n");
+        //fprintf(stderr,"<GET> Command Not Exist\n");
         return 400;
     }
     unsigned char* pcNeedle = pcInHeader+3;
@@ -360,7 +360,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     unsigned char* pcURLFromCommand = pcNeedle;
     if(strncmp(pcURLFromCommand, "http://",7) != 0){
-        fprintf(stderr,"GET url Not Exist\n");
+        //fprintf(stderr,"GET url Not Exist\n");
         return 503;
     }
     pcURLFromCommand+=7;//strlen(" http://") == 7
@@ -395,7 +395,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
                 //GET http://www.kist.re.kr:80/ HTTP/1.0 
                 //GET http://www.kist.re.kr::80 HTTP/1.0
                 //GET http://www.kist.re.kr:80: HTTP/1.0   
-                fprintf(stderr,"URL Error\n");
+                //fprintf(stderr,"URL Error\n");
                 return 400;
             }
         }
@@ -420,7 +420,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     unsigned char* pcHTTPNeedle = pcNeedle;//TODO : space
     if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
-        fprintf(stderr,"HTTP Error\n");
+        //fprintf(stderr,"HTTP Error\n");
         return 400;
     }
     pcNeedle += 8;
@@ -434,7 +434,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
     }//Erase Space
     unsigned char* pcHostCmdNeedle = pcNeedle;
     if(strncmp(pcHostCmdNeedle,"\r\nHost",6) != 0){
-        fprintf(stderr,"Host Command Not Exist\n");
+        ////fprintf(stderr,"Host Command Not Exist\n");
         return 400;
     }
     pcNeedle += 6;
@@ -447,7 +447,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         pcNeedle++;
     }//Erase Space
     if(strncmp(pcNeedle,":",1) != 0){
-        fprintf(stderr,"Host : Not Exist\n");
+        ////fprintf(stderr,"Host : Not Exist\n");
         return 400;
     }
     pcNeedle += 1;
@@ -471,12 +471,12 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     if(nHostLengthFromCommand != nHostLengthFromName)
     {
-        fprintf(stderr,"503 Service Unavailable\n");
+        ////fprintf(stderr,"503 Service Unavailable\n");
         return 400;
     }
     else if (strncmp(pcURLFromCommand,pcHostNameStart,nHostLengthFromCommand) != 0)
     {
-        fprintf(stderr,"400 Bad Request\n");
+        ////fprintf(stderr,"400 Bad Request\n");
         return 400;
     }
     else
@@ -564,7 +564,7 @@ unsigned char** FileToList(int* nListSize)
         pcStartNeedle = strstr(pcReadLine,"http://");
         if(pcStartNeedle == NULL)
         {
-            fprintf(stderr, "BlackList format Error\n");
+            ////fprintf(stderr, "BlackList format Error\n");
             *nListSize = -1;
             return NULL;
         }
