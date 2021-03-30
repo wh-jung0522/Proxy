@@ -36,13 +36,18 @@
 #include <sys/wait.h>
 #include <signal.h>
 
+#define REDIRECTIONURL "http://warning.or.kr"
 #define BUFFERSIZE 1024
 #define MAXURL 2048
 #define BACKLOG 10   // how many pending connections queue will hold
 
 int HaveDoubleEnter(unsigned char* pcInOutBuffer);
 int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, const int nDestBuffer);
-int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport);
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport, unsigned char**pcInBlackList, int nBlackList);
+int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList);
+unsigned char** FileToList(int* nListSize);
+void FreeArrayBuffer(unsigned char** pcBufferArray, int nTotalBuffer);
+
 void sigchld_handler(int s);
 void *get_in_addr(struct sockaddr *sa);
 
@@ -55,6 +60,8 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    int nBlackList = 0;
+    unsigned char** pcBlackList = FileToList(&nBlackList);
 
     //Networking Beej's Guide
     int sockfd;  // listen on sock_fd, new connection on newClient
@@ -170,7 +177,7 @@ int main(int argc, char* argv[])
             unsigned char* pcSendHeader = calloc(1,strlen(pcCopiedHeader)+1);
 
 
-            if((ErrorNo = ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort)) != 0) 
+            if((ErrorNo = ProcessFromHeader(pcCopiedHeader,pcSendHeader,pcHost,&nPort, pcBlackList, nBlackList)) != 0) 
             {
                 //TODO : Error Handling
                 switch(ErrorNo)
@@ -196,8 +203,6 @@ int main(int argc, char* argv[])
                 }
                 goto MemFree;
             }
-            //Todo : Host Compare!
-
 
             //2. Send To HTTP Server
             struct addrinfo* addrHTTPServer;
@@ -229,7 +234,7 @@ int main(int argc, char* argv[])
                 perror("connect");
                 goto MemFree;
             }
-            if(send(nServerSock,pcSendHeader,strlen(pcSendHeader)+1,0)==-1)
+            if(send(nServerSock,pcSendHeader,strlen(pcSendHeader),0)==-1)
             {
                 perror("send");
                 goto MemFree;
@@ -283,7 +288,7 @@ int main(int argc, char* argv[])
         }
         if(newClient !=0) close(newClient);  // parent doesn't need this
     }
-
+    if(pcBlackList!=NULL) FreeArrayBuffer(pcBlackList,nBlackList);
     return 0;
 }
 int HaveDoubleEnter(unsigned char* pcInOutBuffer){
@@ -324,7 +329,7 @@ int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, 
        return nDestBuffer;
    }
 }
-int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport){
+int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport, unsigned char**pcInBlackList, int nBlackList){
 
     /*    
         Input  : pcInHeader == GET http://www.google.co.kr/ HTTP/1.0
@@ -334,98 +339,261 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
                                 Host : www.google.co.kr\r\n\r\n\0
         Output : pcOutHostname => www.google.co.kr already allocated char[MAXURL+1]
                : pnOutport == 80
-        return : Error==0, Success==1
+        return : Error==400,503, Success==0
     */
     *pnOutport = 80;
 
-    if(strncmp("GET",pcInHeader,3) != 0){ //should consider (only Start of Buffer)!
+    if(strncmp("GET ",pcInHeader,4) != 0)//TODO : space
+    { 
         fprintf(stderr,"<GET> Command Not Exist\n");
         return 400;
     }
+    unsigned char* pcNeedle = pcInHeader+3;
+    while(1)
+    {
+        if(*pcNeedle!=' ')
+        {
+            break;
+        }
+        pcNeedle++;
+    }//Erase Space
 
-
-    unsigned char* pcHostNeedle = NULL;
-    pcHostNeedle = strstr(pcInHeader,"Host");
-    if(pcHostNeedle == NULL){
-        fprintf(stderr,"Host Command Not Exist\n");
-        return 400;
-    }
-
-    unsigned char* pcHTTPNeedle = NULL;
-    pcHTTPNeedle = strstr(pcInHeader,"HTTP");
-    if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
-        fprintf(stderr,"Host Command Not Exist\n");
-        return 400;
-    }
-
-
-    unsigned char* pcTempFromCommand = strstr(pcInHeader, "http://");
-    if(pcTempFromCommand == NULL){
+    unsigned char* pcURLFromCommand = pcNeedle;
+    if(strncmp(pcURLFromCommand, "http://",7) != 0){
         fprintf(stderr,"GET url Not Exist\n");
         return 503;
     }
-    pcTempFromCommand+=7;//strlen("http://") == 7
-    unsigned char* pcTempFromCommandEnd = strpbrk(pcTempFromCommand, ":/ ");
-    int nUrlLength = pcTempFromCommandEnd-pcTempFromCommand; //without '/'
+    pcURLFromCommand+=7;//strlen(" http://") == 7
+    unsigned char* pcURLPathFromCommand = strpbrk(pcURLFromCommand, ":/ ");//GET http://www.kist.re.kr/kist_web/resource/image/common/footer_logo.png:80 HTTP/1.0 case
+    unsigned char* pcURLEndFromCommand = strchr(pcURLFromCommand,' ');
+    unsigned char* pcErrorChkNeedle = NULL;
+    int nHostLengthFromCommand = pcURLPathFromCommand-pcURLFromCommand; //without '/'
+    int nURLPathLength = 0;
 
-    unsigned char* pcTempFromHost = strchr(pcHostNeedle, ' ');
-    if(pcTempFromHost == NULL){
-        fprintf(stderr,"HOST url Not Exist\n");
-        return 503;
-    }
-    pcTempFromHost+=1;
-    //TODO : Erase From Host http:// Not Did
-    unsigned char* pcHostRequest = NULL;
-    pcHostRequest = strstr(pcTempFromHost,"http://");
-    if(pcHostRequest != NULL)
+    //If pcURLPathFromCommand == '/' -> Port check one more
+    unsigned char* pcPortStart = NULL;
+    if(*pcURLPathFromCommand == '/')
     {
-        pcTempFromHost+=7;
+        pcPortStart = strchr(pcURLPathFromCommand,':');
+        if((pcPortStart != NULL)&&(pcPortStart < pcURLEndFromCommand))//GET http://www.kist.re.kr/a:80 HTTP/1.0 
+        {
+            *pnOutport = atoi(pcPortStart+1);
+            nURLPathLength = pcPortStart-pcURLPathFromCommand;
+        }
+        else//GET http://www.kist.re.kr/a/b/c/d HTTP/1.0
+        {
+            nURLPathLength = pcURLEndFromCommand-pcURLPathFromCommand;
+        }
     }
+    else if(*pcURLPathFromCommand == ':')//GET http://www.kist.re.kr:80 HTTP/1.0 
+    {   
+        pcErrorChkNeedle = strpbrk(pcURLPathFromCommand+1, ":/ ");
+        if(pcErrorChkNeedle != NULL)
+        {
+            if(pcErrorChkNeedle != pcURLEndFromCommand)
+            {
+                //GET http://www.kist.re.kr:80/ HTTP/1.0 
+                //GET http://www.kist.re.kr::80 HTTP/1.0
+                //GET http://www.kist.re.kr:80: HTTP/1.0   
+                fprintf(stderr,"URL Error\n");
+                return 400;
+            }
+        }
+        
+        *pnOutport = atoi(pcURLPathFromCommand+1);
+        nURLPathLength = 0;
+    }
+    else //GET http://www.kist.re.kr HTTP/1.0 
+    {
+        nURLPathLength = 0;
+    }
+    //if nURLPathLength == 0 -> add '/' else add strncpy(pcOut, pcURLPathFromCommand ,nURLPahtLength);
+    pcNeedle = pcURLEndFromCommand;
+    while(1)
+    {
+        if(*pcNeedle!=' ')
+        {
+            break;
+        }
+        pcNeedle++;
+    }//Erase Space
+
+    unsigned char* pcHTTPNeedle = pcNeedle;//TODO : space
+    if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
+        fprintf(stderr,"HTTP Error\n");
+        return 400;
+    }
+    pcNeedle += 8;
+    while(1)
+    {
+        if(*pcNeedle!=' ')
+        {
+            break;
+        }
+        pcNeedle++;
+    }//Erase Space
+    unsigned char* pcHostCmdNeedle = pcNeedle;
+    if(strncmp(pcHostCmdNeedle,"\r\nHost",6) != 0){
+        fprintf(stderr,"Host Command Not Exist\n");
+        return 400;
+    }
+    pcNeedle += 6;
+    while(1)
+    {
+        if(*pcNeedle!=' ')
+        {
+            break;
+        }
+        pcNeedle++;
+    }//Erase Space
+    if(strncmp(pcNeedle,":",1) != 0){
+        fprintf(stderr,"Host : Not Exist\n");
+        return 400;
+    }
+    pcNeedle += 1;
+    while(1)
+    {
+        if(*pcNeedle!=' ')
+        {
+            break;
+        }
+        pcNeedle++;
+    }//Erase Space
+
+    unsigned char* pcHostNameStart = pcNeedle;
+    if(strncmp(pcHostNameStart,"http://",7) == 0)
+    {
+        pcHostNameStart +=7;
+    }
+    unsigned char* pcHostNameEnd = strpbrk(pcHostNameStart, " \r\n");
+    int nHostLengthFromName = pcHostNameEnd-pcHostNameStart;
 
 
-    unsigned char* pcTempFromHostEnd = strstr(pcTempFromHost, "\r\n");
-    int nUrlFromHostLength = pcTempFromHostEnd - pcTempFromHost;
-
-    if(nUrlLength != nUrlFromHostLength)
+    if(nHostLengthFromCommand != nHostLengthFromName)
     {
         fprintf(stderr,"503 Service Unavailable\n");
         return 503;
     }
-    else if (strncmp(pcTempFromHost,pcTempFromCommand,nUrlLength) != 0)
+    else if (strncmp(pcURLFromCommand,pcHostNameStart,nHostLengthFromCommand) != 0)
     {
         fprintf(stderr,"400 Bad Request\n");
         return 400;
     }
     else
     {
-        strncpy(pcOutHostname,pcTempFromCommand,nUrlLength);
+        strncpy(pcOutHostname,pcURLFromCommand,nHostLengthFromCommand);
     }
-    if(*pcTempFromCommandEnd == ':')
-    {
-        *pnOutport = atoi(pcTempFromCommandEnd+1);
-        pcTempFromCommandEnd = strpbrk(pcTempFromCommandEnd,  "/ ");
-    }
+    //TODO : Host & Blacklist Compare , 
 
     strncat(pcOutHeader,pcInHeader,4);// "GET " 
-
-    if(*pcTempFromCommandEnd == ' ')
-    {
-        strncat(pcOutHeader,"/",1);
-    }
-    if (pcHostRequest == NULL)
-    {
-        strcat(pcOutHeader,pcTempFromCommandEnd);// "/ HTTP/1.0 .... \0"
-    }
-    else 
-    {
-        int nCmdCpyLength = pcHostNeedle-pcTempFromCommandEnd;
-        strncat(pcOutHeader, pcTempFromCommandEnd, nCmdCpyLength);
-        strcat(pcOutHeader,"Host: ");
-        strncat(pcOutHeader,pcTempFromHost,nUrlLength);
-        strcat(pcOutHeader+nUrlLength,pcTempFromHost+nUrlLength);
-    }
+    //if nURLPathLength == 0 -> add '/' else add strncpy(pcOut, pcURLPathFromCommand ,nURLPahtLength);
     
+
+    //TODO : BlackList
+
+    if(IsRedirection(pcOutHostname,pcInBlackList,nBlackList))
+    {
+        strcat(pcOutHeader,"/ HTTP/1.0\r\nHost: ");
+        strcat(pcOutHeader,REDIRECTIONURL);
+        strcat(pcOutHeader,"\r\n\r\n");  
+    }
+    else
+    {
+        if(nURLPathLength == 0)
+        {
+            strcat(pcOutHeader,"/");
+        }
+        else
+        {
+            strncat(pcOutHeader, pcURLPathFromCommand ,nURLPathLength);
+        }
+        strcat(pcOutHeader," HTTP/1.0\r\nHost: ");
+        strcat(pcOutHeader,pcOutHostname);
+        strcat(pcOutHeader,"\r\n\r\n");    
+    }
     return 0;
+}
+
+
+int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList)
+{
+    if(Blacklist == NULL) return 0;
+    for(int i=0;i<nBlackList;i++)
+    {
+        if(strcmp(pcInputHost,Blacklist[i])==0)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+unsigned char** FileToList(int* nListSize)
+{
+    if(isatty(STDIN_FILENO)==1) 
+    {
+        *nListSize = 0;
+        return NULL;
+    }
+    int nBlackList = 0;
+    int nMulBlacklist = 1;
+    unsigned char** TempBlackList = NULL;
+    unsigned char* pcReadLine = calloc(1,MAXURL+1);
+    unsigned char* pcStartNeedle = NULL;
+    unsigned char* pcEndNeedle = NULL;
+    int nHostLength = 0;
+    unsigned char** InBlacklist = calloc(sizeof(unsigned char*),BUFFERSIZE);
+
+    while((fgets(pcReadLine,MAXURL,stdin)!= NULL))//http:// & \n not store!
+    {
+        nBlackList++;
+        if (nBlackList > (nMulBlacklist*BUFFERSIZE))
+        {
+            //realloc Blacklist
+            TempBlackList = calloc(sizeof(unsigned char*),(BUFFERSIZE*(nMulBlacklist+1)));
+            for(int i=0;i<(BUFFERSIZE*nMulBlacklist);i++)
+            {
+                TempBlackList[i] = InBlacklist[i];
+            }
+            free(InBlacklist);
+            InBlacklist = TempBlackList;
+            nMulBlacklist++;
+        }
+        pcStartNeedle = strstr(pcReadLine,"http://");
+        if(pcStartNeedle == NULL)
+        {
+            fprintf(stderr, "BlackList format Error\n");
+            *nListSize = -1;
+            return NULL;
+        }
+        pcStartNeedle+=7;
+        pcEndNeedle = strchr(pcStartNeedle,'\n');
+
+        InBlacklist[nBlackList-1] = calloc(1,strlen(pcReadLine)+1);
+
+        if(pcEndNeedle == NULL)
+        {
+            strcpy(InBlacklist[nBlackList-1],pcStartNeedle);
+        }
+        else
+        {
+            strncpy(InBlacklist[nBlackList-1],pcStartNeedle,pcEndNeedle-pcStartNeedle);
+        }
+        pcStartNeedle = NULL;
+        pcEndNeedle = NULL;
+        memset(pcReadLine,0,MAXURL+1);
+    }
+    *nListSize = nBlackList;
+    return InBlacklist;
+}
+void FreeArrayBuffer(unsigned char** pcBufferArray, int nTotalBuffer)
+{
+    for(int i=0;i<nTotalBuffer;i++)
+    {
+        free(pcBufferArray[i]);
+    }
+    free(pcBufferArray);
+    return;
 }
 void sigchld_handler(int s)
 {

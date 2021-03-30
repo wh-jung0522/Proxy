@@ -1,7 +1,8 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
-#define BUFFERSIZE 3
+#include<unistd.h>
+#define BUFFERSIZE 1024
 #define MAXURL 2048
 #define REDIRECTIONURL "http://warning.or.kr"
 
@@ -10,11 +11,11 @@ int DynamicCopyBuffer(unsigned char** pcDestBuffer, unsigned char* pcSrcBuffer, 
 int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, unsigned char* pcOutHostname, int* pnOutport, unsigned char**pcInBlackList, int nBlackList);
 int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList);
 unsigned char** FileToList(int* nListSize);
-
+void FreeArrayBuffer(unsigned char** pcBufferArray, int nTotalBuffer);
 int main (int argc, char* argv[]){
 
 
-    unsigned char* pcTestText[] = {"GET"," ht","tp:","//w","ww.","kis","t.r","e.k","r/k","ist","_we","b/r","eso","urc","e/i","mag","e/c","omm","on/","foo","ter","_lo","go.","png"," HT","TP/","1.0","\r\nH","ost",": w","ww.","kis","t.r","e.k","r\r\n","\r\n"};
+    unsigned char* pcTestText[] = {"GET http://www.kist.re.kr/kist_web/resource/image/common/footer_logo.png:80 HTTP/1.0\r\nHost: http://www.kist.re.kr\r\n\r\n"};
     unsigned char* pcCopiedBuffer = calloc(1,BUFFERSIZE+1);
     int hasDoubleEnter;
     int nDestBuffer = 1;
@@ -89,7 +90,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
                                 Host : www.google.co.kr\r\n\r\n\0
         Output : pcOutHostname => www.google.co.kr already allocated char[MAXURL+1]
                : pnOutport == 80
-        return : Error==0, Success==1
+        return : Error==400,503, Success==0
     */
     *pnOutport = 80;
 
@@ -145,7 +146,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
                 //GET http://www.kist.re.kr:80/ HTTP/1.0 
                 //GET http://www.kist.re.kr::80 HTTP/1.0
                 //GET http://www.kist.re.kr:80: HTTP/1.0   
-                fprintf(stderr,"<GET> Command Not Exist\n");
+                fprintf(stderr,"URL Error\n");
                 return 400;
             }
         }
@@ -170,7 +171,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     unsigned char* pcHTTPNeedle = pcNeedle;//TODO : space
     if(strncmp(pcHTTPNeedle,"HTTP/1.0",8)!=0){
-        fprintf(stderr,"HTTP Command Not Exist\n");
+        fprintf(stderr,"HTTP Error\n");
         return 400;
     }
     pcNeedle += 8;
@@ -243,7 +244,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
     if(IsRedirection(pcOutHostname,pcInBlackList,nBlackList))
     {
-        strcat(pcOutHeader,"/ HTTP/1.0\nHost: ");
+        strcat(pcOutHeader,"/ HTTP/1.0\r\nHost: ");
         strcat(pcOutHeader,REDIRECTIONURL);
         strcat(pcOutHeader,"\r\n\r\n");  
     }
@@ -257,7 +258,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
         {
             strncat(pcOutHeader, pcURLPathFromCommand ,nURLPathLength);
         }
-        strcat(pcOutHeader," HTTP/1.0\nHost: ");
+        strcat(pcOutHeader," HTTP/1.0\r\nHost: ");
         strcat(pcOutHeader,pcOutHostname);
         strcat(pcOutHeader,"\r\n\r\n");    
     }
@@ -267,6 +268,7 @@ int ProcessFromHeader(unsigned char* pcInHeader, unsigned char* pcOutHeader, uns
 
 int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBlackList)
 {
+    if(Blacklist == NULL) return 0;
     for(int i=0;i<nBlackList;i++)
     {
         if(strcmp(pcInputHost,Blacklist[i])==0)
@@ -279,6 +281,11 @@ int IsRedirection(unsigned char* pcInputHost, unsigned char** Blacklist, int nBl
 
 unsigned char** FileToList(int* nListSize)
 {
+    if(isatty(STDIN_FILENO)==1) 
+    {
+        *nListSize = 0;
+        return NULL;
+    }
     int nBlackList = 0;
     int nMulBlacklist = 1;
     unsigned char** TempBlackList = NULL;
@@ -287,6 +294,7 @@ unsigned char** FileToList(int* nListSize)
     unsigned char* pcEndNeedle = NULL;
     int nHostLength = 0;
     unsigned char** InBlacklist = calloc(sizeof(unsigned char*),BUFFERSIZE);
+
     while((fgets(pcReadLine,MAXURL,stdin)!= NULL))//http:// & \n not store!
     {
         nBlackList++;
@@ -328,4 +336,13 @@ unsigned char** FileToList(int* nListSize)
     }
     *nListSize = nBlackList;
     return InBlacklist;
+}
+void FreeArrayBuffer(unsigned char** pcBufferArray, int nTotalBuffer)
+{
+    for(int i=0;i<nTotalBuffer;i++)
+    {
+        free(pcBufferArray[i]);
+    }
+    free(pcBufferArray);
+    return;
 }
